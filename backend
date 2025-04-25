@@ -1,0 +1,1759 @@
+# Connectup--backend
+// ConnectUp Backend Architecture
+// Server setup with Express and MongoDB
+
+// server.js
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+require('dotenv').config();
+
+// Initialize express app
+const app = express();
+
+// Middleware
+app.use(cors());
+app.use(bodyParser.json());
+app.use(bodyParser.urlencoded({ extended: true }));
+
+// MongoDB Connection
+mongoose.connect(process.env.MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+})
+.then(() => console.log('MongoDB connected'))
+.catch(err => console.error('MongoDB connection error:', err));
+
+// Routes
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/users', require('./routes/users'));
+app.use('/api/profiles', require('./routes/profiles'));
+app.use('/api/matches', require('./routes/matches'));
+app.use('/api/messages', require('./routes/messages'));
+app.use('/api/events', require('./routes/events'));
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).send({ error: 'Something went wrong!' });
+});
+
+// Start server
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
+// -----------------------------------------
+// models/User.js
+const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
+
+const UserSchema = new Schema({
+  email: {
+    type: String,
+    required: true,
+    unique: true
+  },
+  password: {
+    type: String,
+    required: true
+  },
+  dateCreated: {
+    type: Date,
+    default: Date.now
+  },
+  lastActive: {
+    type: Date,
+    default: Date.now
+  },
+  verified: {
+    type: Boolean,
+    default: false
+  },
+  onboardingComplete: {
+    type: Boolean,
+    default: false
+  },
+  preferences: {
+    objective: String,
+    connectionType: String,
+    commitment: String
+  },
+  deviceToken: String
+});
+
+module.exports = mongoose.model('User', UserSchema);
+
+// -----------------------------------------
+// models/Profile.js
+const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
+
+const ProfileSchema = new Schema({
+  user: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  name: {
+    type: String,
+    required: true
+  },
+  age: {
+    type: Number,
+    required: true
+  },
+  bio: {
+    type: String,
+    default: ''
+  },
+  interests: [{
+    type: String
+  }],
+  photos: [{
+    url: String,
+    isMain: {
+      type: Boolean,
+      default: false
+    }
+  }],
+  location: {
+    type: {
+      type: String,
+      default: 'Point'
+    },
+    coordinates: {
+      type: [Number], // [longitude, latitude]
+      default: [0, 0]
+    }
+  },
+  lastLocation: {
+    type: {
+      type: String,
+      default: 'Point'
+    },
+    coordinates: {
+      type: [Number],
+      default: [0, 0]
+    },
+    lastUpdated: {
+      type: Date,
+      default: Date.now
+    }
+  },
+  settings: {
+    discoveryDistance: {
+      type: Number,
+      default: 50 // in km
+    },
+    agePreferenceMin: {
+      type: Number,
+      default: 18
+    },
+    agePreferenceMax: {
+      type: Number,
+      default: 100
+    },
+    visibility: {
+      type: Boolean,
+      default: true
+    }
+  }
+});
+
+// Index for geospatial queries
+ProfileSchema.index({ location: '2dsphere' });
+ProfileSchema.index({ lastLocation: '2dsphere' });
+
+module.exports = mongoose.model('Profile', ProfileSchema);
+
+// -----------------------------------------
+// models/Match.js
+const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
+
+const MatchSchema = new Schema({
+  users: [{
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  }],
+  initiatedBy: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  matched: {
+    type: Boolean,
+    default: false
+  },
+  dateMatched: {
+    type: Date
+  },
+  dateInitiated: {
+    type: Date,
+    default: Date.now
+  },
+  lastInteraction: {
+    type: Date,
+    default: Date.now
+  },
+  fullProfileAccess: {
+    type: Map,
+    of: Boolean,
+    default: new Map()
+  }
+});
+
+module.exports = mongoose.model('Match', MatchSchema);
+
+// -----------------------------------------
+// models/Message.js
+const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
+
+const MessageSchema = new Schema({
+  match: {
+    type: Schema.Types.ObjectId,
+    ref: 'Match',
+    required: true
+  },
+  sender: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  receiver: {
+    type: Schema.Types.ObjectId,
+    ref: 'User',
+    required: true
+  },
+  content: {
+    type: String,
+    required: true
+  },
+  read: {
+    type: Boolean,
+    default: false
+  },
+  readAt: {
+    type: Date
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+module.exports = mongoose.model('Message', MessageSchema);
+
+// -----------------------------------------
+// models/Event.js
+const mongoose = require('mongoose');
+const Schema = mongoose.Schema;
+
+const EventSchema = new Schema({
+  title: {
+    type: String,
+    required: true
+  },
+  description: {
+    type: String,
+    required: true
+  },
+  date: {
+    type: Date,
+    required: true
+  },
+  endDate: {
+    type: Date
+  },
+  location: {
+    type: {
+      type: String,
+      default: 'Point'
+    },
+    coordinates: {
+      type: [Number], // [longitude, latitude]
+      required: true
+    },
+    address: String,
+    city: String,
+    state: String,
+    country: String
+  },
+  imageUrl: String,
+  capacity: {
+    type: Number,
+    required: true
+  },
+  createdBy: {
+    type: Schema.Types.ObjectId,
+    ref: 'User'
+  },
+  attendees: [{
+    user: {
+      type: Schema.Types.ObjectId,
+      ref: 'User'
+    },
+    status: {
+      type: String,
+      enum: ['attending', 'interested', 'not-attending'],
+      default: 'interested'
+    },
+    checkedIn: {
+      type: Boolean,
+      default: false
+    },
+    checkedInAt: Date
+  }],
+  qrCode: {
+    type: String,
+    required: true
+  },
+  isPublic: {
+    type: Boolean,
+    default: true
+  },
+  tags: [{
+    type: String
+  }],
+  status: {
+    type: String,
+    enum: ['upcoming', 'ongoing', 'completed', 'cancelled'],
+    default: 'upcoming'
+  }
+});
+
+// Index for geospatial queries
+EventSchema.index({ location: '2dsphere' });
+
+module.exports = mongoose.model('Event', EventSchema);
+
+// -----------------------------------------
+// routes/auth.js
+const express = require('express');
+const router = express.Router();
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+const { check, validationResult } = require('express-validator');
+const auth = require('../middleware/auth');
+
+// @route   POST api/auth/register
+// @desc    Register user
+// @access  Public
+router.post('/register', [
+  check('email', 'Please include a valid email').isEmail(),
+  check('password', 'Password is required with 6 or more characters').isLength({ min: 6 })
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  const { email, password } = req.body;
+
+  try {
+    // Check if user exists
+    let user = await User.findOne({ email });
+    if (user) {
+      return res.status(400).json({ msg: 'User already exists' });
+    }
+
+    user = new User({
+      email,
+      password
+    });
+
+    // Encrypt password
+    const salt = await bcrypt.genSalt(10);
+    user.password = await bcrypt.hash(password, salt);
+
+    await user.save();
+
+    // Return JWT
+    const payload = {
+      user: {
+        id: user.id
+      }
+    };
+
+    jwt.sign(
+      payload,
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' },
+      (err, token) => {
+        if (err) throw err;
+        res.json({ token });
+      }
+    );
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server error');
+  }
+});
+
+// @route   POST api/auth/login
+// @desc    Authenticate user & get token
+// @access  Public
+router.post('/login', [
+  check('email', 'Please include a valid email').isEmail(),
+  check('password', 'Password is required').exists()
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  const { email, password, deviceToken } = req.body;
+
+  try {
+    // Check if user exists
+    let user = await User.findOne({ email });
+    if (!user) {
+      return res.status(400).json({ msg: 'Invalid credentials' });
+    }
+
+    // Check password
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ msg: 'Invalid credentials' });
+    }
+
+    // Update last active and device token if provided
+    if (deviceToken) {
+      user.deviceToken = deviceToken;
+    }
+    user.lastActive = Date.now();
+    await user.save();
+
+    // Return JWT
+    const payload = {
+      user: {
+        id: user.id
+      }
+    };
+
+    jwt.sign(
+      payload,
+      process.env.JWT_SECRET,
+      { expiresIn: '7d' },
+      (err, token) => {
+        if (err) throw err;
+        res.json({ 
+          token,
+          onboardingComplete: user.onboardingComplete
+        });
+      }
+    );
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server error');
+  }
+});
+
+// @route   GET api/auth/me
+// @desc    Get logged in user
+// @access  Private
+router.get('/me', auth, async (req, res) => {
+  try {
+    const user = await User.findById(req.user.id).select('-password');
+    res.json(user);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server error');
+  }
+});
+
+module.exports = router;
+
+// -----------------------------------------
+// routes/profiles.js
+const express = require('express');
+const router = express.Router();
+const auth = require('../middleware/auth');
+const Profile = require('../models/Profile');
+const User = require('../models/User');
+const Match = require('../models/Match');
+const { check, validationResult } = require('express-validator');
+
+// @route   POST api/profiles
+// @desc    Create or update user profile
+// @access  Private
+router.post('/', [
+  auth,
+  [
+    check('name', 'Name is required').not().isEmpty(),
+    check('age', 'Age is required').isNumeric()
+  ]
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  const {
+    name,
+    age,
+    bio,
+    interests,
+    location,
+    photos,
+    settings
+  } = req.body;
+
+  // Build profile object
+  const profileFields = {};
+  profileFields.user = req.user.id;
+  if (name) profileFields.name = name;
+  if (age) profileFields.age = age;
+  if (bio) profileFields.bio = bio;
+  if (interests) profileFields.interests = interests;
+  if (photos) profileFields.photos = photos;
+  if (settings) profileFields.settings = settings;
+  
+  if (location) {
+    profileFields.location = {
+      type: 'Point',
+      coordinates: [location.longitude, location.latitude]
+    };
+    profileFields.lastLocation = {
+      type: 'Point',
+      coordinates: [location.longitude, location.latitude],
+      lastUpdated: Date.now()
+    };
+  }
+
+  try {
+    let profile = await Profile.findOne({ user: req.user.id });
+
+    if (profile) {
+      // Update
+      profile = await Profile.findOneAndUpdate(
+        { user: req.user.id },
+        { $set: profileFields },
+        { new: true }
+      );
+
+      return res.json(profile);
+    }
+
+    // Create
+    profile = new Profile(profileFields);
+    await profile.save();
+
+    // Mark onboarding as complete in User model
+    await User.findByIdAndUpdate(req.user.id, { onboardingComplete: true });
+
+    res.json(profile);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   GET api/profiles/me
+// @desc    Get current user's profile
+// @access  Private
+router.get('/me', auth, async (req, res) => {
+  try {
+    const profile = await Profile.findOne({ user: req.user.id });
+    
+    if (!profile) {
+      return res.status(400).json({ msg: 'Profile not found' });
+    }
+
+    res.json(profile);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   GET api/profiles/discover
+// @desc    Get profiles for discovery based on preferences
+// @access  Private
+router.get('/discover', auth, async (req, res) => {
+  try {
+    const userProfile = await Profile.findOne({ user: req.user.id });
+    if (!userProfile) {
+      return res.status(400).json({ msg: 'Your profile not found' });
+    }
+    
+    // Find users that the current user has already interacted with
+    const interactions = await Match.find({
+      users: { $in: [req.user.id] }
+    });
+    
+    const interactedUserIds = interactions.flatMap(match => 
+      match.users.filter(userId => userId.toString() !== req.user.id)
+    );
+    
+    // Add current user to excluded list
+    interactedUserIds.push(req.user.id);
+
+    // Query for discovery
+    const { 
+      discoveryDistance = userProfile.settings.discoveryDistance,
+      ageMin = userProfile.settings.agePreferenceMin,
+      ageMax = userProfile.settings.agePreferenceMax,
+      interests,
+      limit = 20
+    } = req.query;
+
+    // Build query
+    let query = {
+      user: { $nin: interactedUserIds },
+      'settings.visibility': true,
+      age: { $gte: ageMin, $lte: ageMax }
+    };
+
+    // Location-based filter
+    if (userProfile.location && userProfile.location.coordinates[0] !== 0) {
+      query.location = {
+        $near: {
+          $geometry: {
+            type: 'Point',
+            coordinates: userProfile.location.coordinates
+          },
+          $maxDistance: discoveryDistance * 1000 // convert km to meters
+        }
+      };
+    }
+
+    // Interest-based filter (optional)
+    if (interests) {
+      const interestList = interests.split(',');
+      query.interests = { $in: interestList };
+    }
+
+    const profiles = await Profile.find(query)
+      .limit(parseInt(limit))
+      .select('-settings');
+
+    res.json(profiles);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   PUT api/profiles/location
+// @desc    Update user's current location
+// @access  Private
+router.put('/location', auth, async (req, res) => {
+  try {
+    const { latitude, longitude } = req.body;
+    
+    if (!latitude || !longitude) {
+      return res.status(400).json({ msg: 'Latitude and longitude are required' });
+    }
+
+    const profile = await Profile.findOneAndUpdate(
+      { user: req.user.id },
+      { 
+        $set: { 
+          lastLocation: {
+            type: 'Point',
+            coordinates: [longitude, latitude],
+            lastUpdated: Date.now()
+          }
+        }
+      },
+      { new: true }
+    );
+
+    res.json({ success: true, location: profile.lastLocation });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   GET api/profiles/user/:user_id
+// @desc    Get profile by user ID
+// @access  Private
+router.get('/user/:user_id', auth, async (req, res) => {
+  try {
+    // Check if the requesting user has full profile access
+    const match = await Match.findOne({
+      users: { $all: [req.user.id, req.params.user_id] },
+      matched: true
+    });
+
+    let fullAccess = false;
+    if (match && match.fullProfileAccess) {
+      fullAccess = match.fullProfileAccess.get(req.params.user_id) || false;
+    }
+
+    const profile = await Profile.findOne({ user: req.params.user_id });
+    
+    if (!profile) {
+      return res.status(404).json({ msg: 'Profile not found' });
+    }
+
+    // If no full access, return limited profile
+    if (!fullAccess) {
+      const limitedProfile = {
+        name: profile.name,
+        age: profile.age,
+        bio: profile.bio,
+        interests: profile.interests,
+        photos: profile.photos.filter(photo => photo.isMain)
+      };
+      return res.json(limitedProfile);
+    }
+
+    res.json(profile);
+  } catch (err) {
+    console.error(err.message);
+    if (err.kind === 'ObjectId') {
+      return res.status(404).json({ msg: 'Profile not found' });
+    }
+    res.status(500).send('Server Error');
+  }
+});
+
+module.exports = router;
+
+// -----------------------------------------
+// routes/matches.js
+const express = require('express');
+const router = express.Router();
+const auth = require('../middleware/auth');
+const Match = require('../models/Match');
+const Profile = require('../models/Profile');
+const User = require('../models/User');
+const { sendPushNotification } = require('../utils/notifications');
+
+// @route   POST api/matches
+// @desc    Create a match or like
+// @access  Private
+router.post('/', auth, async (req, res) => {
+  try {
+    const { targetUserId } = req.body;
+    
+    if (!targetUserId) {
+      return res.status(400).json({ msg: 'Target user ID is required' });
+    }
+
+    // Check if target user exists
+    const targetUser = await User.findById(targetUserId);
+    if (!targetUser) {
+      return res.status(404).json({ msg: 'Target user not found' });
+    }
+
+    // Check if there's already a match initiated by the target user
+    const existingMatch = await Match.findOne({
+      users: { $all: [req.user.id, targetUserId] }
+    });
+
+    if (existingMatch) {
+      if (existingMatch.initiatedBy.toString() === req.user.id) {
+        // User already liked this person
+        return res.json({ match: existingMatch, isNewMatch: false });
+      } else {
+        // This is a mutual match!
+        existingMatch.matched = true;
+        existingMatch.dateMatched = Date.now();
+        existingMatch.lastInteraction = Date.now();
+        await existingMatch.save();
+
+        // Get profiles for notification
+        const initiatorProfile = await Profile.findOne({ user: req.user.id });
+        const targetProfile = await Profile.findOne({ user: targetUserId });
+
+        // Send push notification to target user
+        if (targetUser.deviceToken) {
+          await sendPushNotification(
+            targetUser.deviceToken,
+            'New Match!',
+            `You and ${initiatorProfile.name} have matched! Start chatting now.`
+          );
+        }
+
+        return res.json({ 
+          match: existingMatch, 
+          isNewMatch: true,
+          matchedProfile: {
+            id: targetUserId,
+            name: targetProfile.name,
+            age: targetProfile.age,
+            image: targetProfile.photos.find(p => p.isMain)?.url || ''
+          }
+        });
+      }
+    }
+
+    // Create new match record
+    const newMatch = new Match({
+      users: [req.user.id, targetUserId],
+      initiatedBy: req.user.id,
+      matched: false,
+      fullProfileAccess: new Map()
+    });
+
+    await newMatch.save();
+
+    res.json({ match: newMatch, isNewMatch: false });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   GET api/matches
+// @desc    Get all matches for the current user
+// @access  Private
+router.get('/', auth, async (req, res) => {
+  try {
+    // Get only successful matches
+    const matches = await Match.find({
+      users: req.user.id,
+      matched: true
+    }).sort({ lastInteraction: -1 });
+
+    // Get profile information for matched users
+    const matchDetails = await Promise.all(
+      matches.map(async (match) => {
+        const matchedUserId = match.users.find(
+          userId => userId.toString() !== req.user.id
+        );
+        
+        const matchedProfile = await Profile.findOne({ user: matchedUserId });
+        
+        if (!matchedProfile) {
+          return null;
+        }
+
+        return {
+          matchId: match._id,
+          userId: matchedUserId,
+          name: matchedProfile.name,
+          age: matchedProfile.age,
+          image: matchedProfile.photos.find(p => p.isMain)?.url || '',
+          dateMatched: match.dateMatched,
+          lastInteraction: match.lastInteraction,
+          showFullProfile: match.fullProfileAccess.get(req.user.id.toString()) || false
+        };
+      })
+    );
+
+    // Filter out null values (profiles not found)
+    const validMatches = matchDetails.filter(match => match !== null);
+
+    res.json(validMatches);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   PUT api/matches/:id/profile-access
+// @desc    Grant full profile access to a match
+// @access  Private
+router.put('/:id/profile-access', auth, async (req, res) => {
+  try {
+    const match = await Match.findById(req.params.id);
+    
+    if (!match) {
+      return res.status(404).json({ msg: 'Match not found' });
+    }
+    
+    // Verify the user is part of this match
+    if (!match.users.includes(req.user.id)) {
+      return res.status(401).json({ msg: 'Not authorized' });
+    }
+    
+    // Get the other user in the match
+    const otherUserId = match.users.find(
+      userId => userId.toString() !== req.user.id
+    );
+    
+    // Update fullProfileAccess map
+    match.fullProfileAccess.set(otherUserId.toString(), true);
+    await match.save();
+    
+    // Get user details for notification
+    const userProfile = await Profile.findOne({ user: req.user.id });
+    const otherUser = await User.findById(otherUserId);
+    
+    // Send push notification to other user
+    if (otherUser && otherUser.deviceToken) {
+      await sendPushNotification(
+        otherUser.deviceToken,
+        'Full Profile Access',
+        `${userProfile.name} has shared their full profile with you!`
+      );
+    }
+    
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+module.exports = router;
+
+// -----------------------------------------
+// routes/messages.js
+const express = require('express');
+const router = express.Router();
+const auth = require('../middleware/auth');
+const Match = require('../models/Match');
+const Message = require('../models/Message');
+const User = require('../models/User');
+const Profile = require('../models/Profile');
+const { sendPushNotification } = require('../utils/notifications');
+
+// @route   POST api/messages
+// @desc    Send a message
+// @access  Private
+router.post('/', auth, async (req, res) => {
+  try {
+    const { matchId, content } = req.body;
+
+    if (!matchId || !content) {
+      return res.status(400).json({ msg: 'Match ID and message content are required' });
+    }
+
+    // Verify match exists and user is part of it
+    const match = await Match.findById(matchId);
+    
+    if (!match) {
+      return res.status(404).json({ msg: 'Match not found' });
+    }
+    
+    if (!match.users.includes(req.user.id)) {
+      return res.status(401).json({ msg: 'Not authorized' });
+    }
+
+    if (!match.matched) {
+      return res.status(400).json({ msg: 'Cannot send messages until matched' });
+    }
+
+    // Get recipient (the other user in the match)
+    const receiverId = match.users.find(
+      userId => userId.toString() !== req.user.id
+    );
+
+    // Create new message
+    const newMessage = new Message({
+      match: matchId,
+      sender: req.user.id,
+      receiver: receiverId,
+      content
+    });
+
+    await newMessage.save();
+
+    // Update match's last interaction time
+    match.lastInteraction = Date.now();
+    await match.save();
+
+    // Get recipient user for push notification
+    const receiver = await User.findById(receiverId);
+    const senderProfile = await Profile.findOne({ user: req.user.id });
+
+    // Send push notification
+    if (receiver && receiver.deviceToken) {
+      await sendPushNotification(
+        receiver.deviceToken,
+        `New message from ${senderProfile.name}`,
+        content.length > 50 ? content.substring(0, 47) + '...' : content
+      );
+    }
+
+    res.json(newMessage);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   GET api/messages/:matchId
+// @desc    Get messages for a specific match
+// @access  Private
+router.get('/:matchId', auth, async (req, res) => {
+  try {
+    const match = await Match.findById(req.params.matchId);
+    
+    if (!match) {
+      return res.status(404).json({ msg: 'Match not found' });
+    }
+    
+    if (!match.users.includes(req.user.id)) {
+      return res.status(401).json({ msg: 'Not authorized' });
+    }
+
+    // Get messages for this match
+    const messages = await Message.find({ match: req.params.matchId })
+      .sort({ createdAt: 1 });
+
+    // Mark unread messages as read
+    await Message.updateMany(
+      { 
+        match: req.params.matchId, 
+        receiver: req.user.id,
+        read: false
+      },
+      { 
+        $set: { 
+          read: true, 
+          readAt: Date.now() 
+        } 
+      }
+    );
+
+    res.json(messages);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   GET api/messages/unread/count
+// @desc    Get count of unread messages
+// @access  Private
+router.get('/unread/count', auth, async (req, res) => {
+  try {
+    const unreadCount = await Message.countDocuments({
+      receiver: req.user.id,
+      read: false
+    });
+
+    res.json({ unreadCount });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+module.exports = router;
+
+// -----------------------------------------
+// routes/events.js
+const express = require('express');
+const router = express.Router();
+const auth = require('../middleware/auth');
+const Event = require('../models/Event');
+const Profile = require('../models/Profile');
+const { check, validationResult } = require('express-validator');
+const { generateQRCode } = require('../utils/qrCode');
+
+// @route   POST api/events
+// @desc    Create a new event
+// @access  Private
+router.post('/', [
+  auth,
+  [
+    check('title', 'Title is required').not().isEmpty(),
+    check('description', 'Description is required').not().isEmpty(),
+    check('date', 'Date is required').not().isEmpty(),
+    check('location', 'Location is required').not().isEmpty(),
+    check('capacity', 'Capacity is required').isNumeric()
+  ]
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  try {
+    const {
+      title,
+      description,
+      date,
+      endDate,
+      location,
+      imageUrl,
+      capacity,
+      isPublic,
+      tags
+    } = req.body;
+
+    // Generate unique QR code for the event
+    const qrCodeValue = `connectup-event-${Date.now()}-${req.user.id}`;
+    const qrCode = await generateQRCode(qrCodeValue);
+
+    // Format location
+    const eventLocation = {
+      type: 'Point',
+      coordinates: [location.longitude, location.latitude],
+      address: location.address,
+      city: location.city,
+      state: location.state,
+      country: location.country
+    };
+
+    const newEvent = new Event({
+      title,
+      description,
+      date,
+      endDate,
+      location: eventLocation,
+      imageUrl,
+      capacity,
+      createdBy
+      // Continuation of routes/events.js
+
+// @route   POST api/events
+// @desc    Create a new event
+// @access  Private
+router.post('/', [
+  auth,
+  [
+    check('title', 'Title is required').not().isEmpty(),
+    check('description', 'Description is required').not().isEmpty(),
+    check('date', 'Date is required').not().isEmpty(),
+    check('location', 'Location is required').not().isEmpty(),
+    check('capacity', 'Capacity is required').isNumeric()
+  ]
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  try {
+    const {
+      title,
+      description,
+      date,
+      endDate,
+      location,
+      imageUrl,
+      capacity,
+      isPublic,
+      tags
+    } = req.body;
+
+    // Generate unique QR code for the event
+    const qrCodeValue = `connectup-event-${Date.now()}-${req.user.id}`;
+    const qrCode = await generateQRCode(qrCodeValue);
+
+    // Format location
+    const eventLocation = {
+      type: 'Point',
+      coordinates: [location.longitude, location.latitude],
+      address: location.address,
+      city: location.city,
+      state: location.state,
+      country: location.country
+    };
+
+    const newEvent = new Event({
+      title,
+      description,
+      date,
+      endDate,
+      location: eventLocation,
+      imageUrl,
+      capacity,
+      createdBy: req.user.id,
+      qrCode,
+      isPublic: isPublic !== undefined ? isPublic : true,
+      tags
+    });
+
+    const event = await newEvent.save();
+    res.json(event);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   GET api/events
+// @desc    Get all events near user's location
+// @access  Private
+router.get('/', auth, async (req, res) => {
+  try {
+    const {
+      distance = 50, // in km
+      limit = 20,
+      tags,
+      status = 'upcoming'
+    } = req.query;
+
+    // Get user's profile for location data
+    const userProfile = await Profile.findOne({ user: req.user.id });
+    
+    if (!userProfile || !userProfile.location) {
+      return res.status(400).json({ msg: 'User location not available' });
+    }
+
+    // Build query
+    let query = {};
+    
+    // Filter by status
+    if (status !== 'all') {
+      query.status = status;
+    }
+
+    // Only show future events if status is upcoming
+    if (status === 'upcoming') {
+      query.date = { $gte: new Date() };
+    }
+
+    // Filter by tags if provided
+    if (tags) {
+      const tagList = tags.split(',');
+      query.tags = { $in: tagList };
+    }
+
+    // Location-based query
+    if (userProfile.location.coordinates[0] !== 0) {
+      query.location = {
+        $near: {
+          $geometry: {
+            type: 'Point',
+            coordinates: userProfile.location.coordinates
+          },
+          $maxDistance: distance * 1000 // convert km to meters
+        }
+      };
+    }
+
+    // Find events
+    const events = await Event.find(query)
+      .limit(parseInt(limit))
+      .sort({ date: 1 })
+      .populate('createdBy', 'name -_id');
+
+    // Process events to add attendance info
+    const processedEvents = events.map(event => {
+      const userAttending = event.attendees.some(
+        att => att.user.toString() === req.user.id && att.status === 'attending'
+      );
+      
+      const spotsLeft = event.capacity - event.attendees.filter(
+        att => att.status === 'attending'
+      ).length;
+
+      return {
+        id: event._id,
+        title: event.title,
+        description: event.description,
+        date: event.date,
+        endDate: event.endDate,
+        location: {
+          coordinates: event.location.coordinates,
+          address: event.location.address
+        },
+        imageUrl: event.imageUrl,
+        capacity: event.capacity,
+        attendees: event.attendees.length,
+        spotsLeft: spotsLeft > 0 ? spotsLeft : 0,
+        qrCode: event.qrCode,
+        tags: event.tags,
+        status: event.status,
+        isAttending: userAttending
+      };
+    });
+
+    res.json(processedEvents);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   GET api/events/:id
+// @desc    Get event by ID
+// @access  Private
+router.get('/:id', auth, async (req, res) => {
+  try {
+    const event = await Event.findById(req.params.id);
+    
+    if (!event) {
+      return res.status(404).json({ msg: 'Event not found' });
+    }
+
+    // Check if user is attending
+    const userAttendance = event.attendees.find(
+      att => att.user.toString() === req.user.id
+    );
+
+    const attendanceStatus = userAttendance ? userAttendance.status : 'not-attending';
+    const checkedIn = userAttendance ? userAttendance.checkedIn : false;
+
+    // Get attendee profiles (limited info)
+    const attendeeProfiles = await Promise.all(
+      event.attendees
+        .filter(att => att.status === 'attending')
+        .slice(0, 10) // Limit to first 10 for performance
+        .map(async (att) => {
+          const profile = await Profile.findOne({ user: att.user })
+            .select('name photos');
+          
+          if (!profile) return null;
+          
+          return {
+            userId: att.user,
+            name: profile.name,
+            photo: profile.photos.find(p => p.isMain)?.url || ''
+          };
+        })
+    );
+
+    // Filter out null values
+    const validAttendees = attendeeProfiles.filter(profile => profile !== null);
+
+    // Format response
+    const eventDetails = {
+      id: event._id,
+      title: event.title,
+      description: event.description,
+      date: event.date,
+      endDate: event.endDate,
+      location: event.location,
+      imageUrl: event.imageUrl,
+      capacity: event.capacity,
+      attendeeCount: event.attendees.filter(att => att.status === 'attending').length,
+      spotsLeft: event.capacity - event.attendees.filter(att => att.status === 'attending').length,
+      qrCode: event.qrCode,
+      tags: event.tags,
+      status: event.status,
+      attendees: validAttendees,
+      userStatus: {
+        attendanceStatus,
+        checkedIn
+      }
+    };
+
+    res.json(eventDetails);
+  } catch (err) {
+    console.error(err.message);
+    if (err.kind === 'ObjectId') {
+      return res.status(404).json({ msg: 'Event not found' });
+    }
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   PUT api/events/:id/attend
+// @desc    RSVP to an event
+// @access  Private
+router.put('/:id/attend', auth, async (req, res) => {
+  try {
+    const { status } = req.body;
+    
+    if (!['attending', 'interested', 'not-attending'].includes(status)) {
+      return res.status(400).json({ msg: 'Invalid status value' });
+    }
+
+    const event = await Event.findById(req.params.id);
+    
+    if (!event) {
+      return res.status(404).json({ msg: 'Event not found' });
+    }
+
+    // Check if event is at capacity
+    if (status === 'attending') {
+      const attendingCount = event.attendees.filter(
+        att => att.status === 'attending'
+      ).length;
+      
+      if (attendingCount >= event.capacity) {
+        return res.status(400).json({ msg: 'Event is at capacity' });
+      }
+    }
+
+    // Check if user is already in attendees list
+    const attendeeIndex = event.attendees.findIndex(
+      att => att.user.toString() === req.user.id
+    );
+
+    if (attendeeIndex >= 0) {
+      // Update existing attendance status
+      event.attendees[attendeeIndex].status = status;
+    } else {
+      // Add new attendee
+      event.attendees.push({
+        user: req.user.id,
+        status,
+        checkedIn: false
+      });
+    }
+
+    await event.save();
+
+    res.json({ success: true, status });
+  } catch (err) {
+    console.error(err.message);
+    if (err.kind === 'ObjectId') {
+      return res.status(404).json({ msg: 'Event not found' });
+    }
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   PUT api/events/:id/checkin
+// @desc    Check in to an event using QR code
+// @access  Private
+router.put('/:id/checkin', auth, async (req, res) => {
+  try {
+    const { qrCode, location } = req.body;
+    
+    if (!qrCode) {
+      return res.status(400).json({ msg: 'QR code is required' });
+    }
+
+    const event = await Event.findById(req.params.id);
+    
+    if (!event) {
+      return res.status(404).json({ msg: 'Event not found' });
+    }
+
+    // Verify QR code
+    if (event.qrCode !== qrCode) {
+      return res.status(400).json({ msg: 'Invalid QR code' });
+    }
+
+    // Check if event is active
+    const now = new Date();
+    if (event.date > now) {
+      return res.status(400).json({ msg: 'Event has not started yet' });
+    }
+    
+    if (event.endDate && event.endDate < now) {
+      return res.status(400).json({ msg: 'Event has already ended' });
+    }
+
+    // Verify user is registered for the event
+    const attendeeIndex = event.attendees.findIndex(
+      att => att.user.toString() === req.user.id && att.status === 'attending'
+    );
+
+    if (attendeeIndex === -1) {
+      // Add user as attending
+      event.attendees.push({
+        user: req.user.id,
+        status: 'attending',
+        checkedIn: true,
+        checkedInAt: now
+      });
+    } else {
+      // Update existing attendance
+      event.attendees[attendeeIndex].checkedIn = true;
+      event.attendees[attendeeIndex].checkedInAt = now;
+    }
+
+    // If location provided, record it
+    if (location) {
+      // Update user's profile with current location
+      await Profile.findOneAndUpdate(
+        { user: req.user.id },
+        {
+          $set: {
+            lastLocation: {
+              type: 'Point',
+              coordinates: [location.longitude, location.latitude],
+              lastUpdated: now
+            }
+          }
+        }
+      );
+    }
+
+    await event.save();
+
+    res.json({ 
+      success: true, 
+      message: `Successfully checked in to ${event.title}` 
+    });
+  } catch (err) {
+    console.error(err.message);
+    if (err.kind === 'ObjectId') {
+      return res.status(404).json({ msg: 'Event not found' });
+    }
+    res.status(500).send('Server Error');
+  }
+});
+
+module.exports = router;
+
+// -----------------------------------------
+// routes/users.js
+const express = require('express');
+const router = express.Router();
+const auth = require('../middleware/auth');
+const User = require('../models/User');
+const { check, validationResult } = require('express-validator');
+
+// @route   PUT api/users/preferences
+// @desc    Update user preferences
+// @access  Private
+router.put('/preferences', [
+  auth,
+  [
+    check('objective', 'Objective is required').not().isEmpty(),
+    check('connectionType', 'Connection type preference is required').not().isEmpty(),
+    check('commitment', 'Commitment level is required').not().isEmpty()
+  ]
+], async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) {
+    return res.status(400).json({ errors: errors.array() });
+  }
+
+  try {
+    const { objective, connectionType, commitment } = req.body;
+
+    const user = await User.findByIdAndUpdate(
+      req.user.id,
+      {
+        $set: {
+          preferences: { objective, connectionType, commitment }
+        }
+      },
+      { new: true }
+    ).select('-password');
+
+    res.json(user);
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+// @route   PUT api/users/device-token
+// @desc    Update user device token for push notifications
+// @access  Private
+router.put('/device-token', auth, async (req, res) => {
+  try {
+    const { deviceToken } = req.body;
+    
+    if (!deviceToken) {
+      return res.status(400).json({ msg: 'Device token is required' });
+    }
+
+    await User.findByIdAndUpdate(
+      req.user.id,
+      { $set: { deviceToken } }
+    );
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error(err.message);
+    res.status(500).send('Server Error');
+  }
+});
+
+module.exports = router;
+
+// -----------------------------------------
+// middleware/auth.js
+const jwt = require('jsonwebtoken');
+
+module.exports = function(req, res, next) {
+  // Get token from header
+  const token = req.header('x-auth-token');
+
+  // Check if no token
+  if (!token) {
+    return res.status(401).json({ msg: 'No token, authorization denied' });
+  }
+
+  // Verify token
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    req.user = decoded.user;
+    next();
+  } catch (err) {
+    res.status(401).json({ msg: 'Token is not valid' });
+  }
+};
+
+// -----------------------------------------
+// utils/qrCode.js
+const QRCode = require('qrcode');
+
+// Generate QR code as data URL
+const generateQRCode = async (data) => {
+  try {
+    const qrCodeDataURL = await QRCode.toDataURL(data);
+    return qrCodeDataURL;
+  } catch (err) {
+    console.error('QR Code generation error:', err);
+    throw err;
+  }
+};
+
+module.exports = {
+  generateQRCode
+};
+
+// -----------------------------------------
+// utils/notifications.js
+const admin = require('firebase-admin');
+
+// Initialize Firebase Admin SDK (this should be done in server.js)
+// admin.initializeApp({
+//   credential: admin.credential.cert(require('../config/serviceAccountKey.json'))
+// });
+
+// Send push notification to a user device
+const sendPushNotification = async (deviceToken, title, body, data = {}) => {
+  try {
+    const message = {
+      notification: {
+        title,
+        body
+      },
+      data,
+      token: deviceToken
+    };
+
+    const response = await admin.messaging().send(message);
+    console.log('Push notification sent successfully:', response);
+    return response;
+  } catch (err) {
+    console.error('Error sending push notification:', err);
+    throw err;
+  }
+};
+
+module.exports = {
+  sendPushNotification
+};
+
+// -----------------------------------------
+// config/serviceAccountKey.json example structure
+// {
+//   "type": "service_account",
+//   "project_id": "connectup-app",
+//   "private_key_id": "YOUR_PRIVATE_KEY_ID",
+//   "private_key": "YOUR_PRIVATE_KEY",
+//   "client_email": "firebase-adminsdk@connectup-app.iam.gserviceaccount.com",
+//   "client_id": "YOUR_CLIENT_ID",
+//   "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+//   "token_uri": "https://oauth2.googleapis.com/token",
+//   "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+//   "client_x509_cert_url": "YOUR_CERT_URL"
+// }
+
+// -----------------------------------------
+// .env file example
+// PORT=5000
+// MONGODB_URI=mongodb://localhost:27017/connectup
+// JWT_SECRET=your_jwt_secret
+// NODE_ENV=development
+// FRONTEND_URL=http://localhost:3000
+// FIREBASE_DATABASE_URL=https://your-project.firebaseio.com
+
+// -----------------------------------------
+// package.json example
+// {
+//   "name": "connectup-backend",
+//   "version": "1.0.0",
+//   "description": "Backend server for ConnectUp social app",
+//   "main": "server.js",
+//   "scripts": {
+//     "start": "node server.js",
+//     "server": "nodemon server.js",
+//     "dev": "nodemon server.js"
+//   },
+//   "dependencies": {
+//     "bcryptjs": "^2.4.3",
+//     "body-parser": "^1.19.0",
+//     "cors": "^2.8.5",
+//     "dotenv": "^10.0.0",
+//     "express": "^4.17.1",
+//     "express-validator": "^6.12.1",
+//     "firebase-admin": "^10.0.0",
+//     "jsonwebtoken": "^8.5.1",
+//     "moment": "^2.29.1",
+//     "mongoose": "^6.0.5",
+//     "qrcode": "^1.5.0"
+//   },
+//   "devDependencies": {
+//     "nodemon": "^2.0.12"
+//   }
+// }
+
+// -----------------------------------------
+// README.md
+
+/*
+# ConnectUp Backend API
+
+This is the backend server for the ConnectUp social networking application. It provides RESTful API services for the mobile app.
+
+## Technologies Used
+
+- Node.js & Express
+- MongoDB & Mongoose
+- JWT Authentication
+- Firebase Cloud Messaging for push notifications
+- QR Code generation
+
+## Installation
+
+1. Clone the repository
+2. Install dependencies: `npm install`
+3. Create a `.env` file with required environment variables
+4. Set up a MongoDB database
+5. Get Firebase service account credentials
+6. Start the server: `npm run dev`
+
+## API Endpoints
+
+### Authentication
+- POST `/api/auth/register` - Register new user
+- POST `/api/auth/login` - Login user
+- GET `/api/auth/me` - Get current user info
+
+### User Profile
+- POST `/api/profiles` - Create or update profile
+- GET `/api/profiles/me` - Get current user's profile
+- GET `/api/profiles/discover` - Get profiles for discovery
+- PUT `/api/profiles/location` - Update user's location
+- GET `/api/profiles/user/:id` - Get profile by user ID
+
+### Matches
+- POST `/api/matches` - Create a new match/like
+- GET `/api/matches` - Get all matches for current user
+- PUT `/api/matches/:id/profile-access` - Grant full profile access
+
+### Messages
+- POST `/api/messages` - Send a message
+- GET `/api/messages/:matchId` - Get messages for a match
+- GET `/api/messages/unread/count` - Get unread message count
+
+### Events
+- POST `/api/events` - Create a new event
+- GET `/api/events` - Get events near user
+- GET `/api/events/:id` - Get event details
+- PUT `/api/events/:id/attend` - RSVP to an event
+- PUT `/api/events/:id/checkin` - Check in to an event
+
+### User Settings
+- PUT `/api/users/preferences` - Update user preferences
+- PUT `/api/users/device-token` - Update FCM token
+
+## Authentication
+
+The API uses JWT for authentication. Include the JWT token in the `x-auth-token` header for protected routes.
+
+## Push Notifications
+
+The system sends push notifications for:
+- New matches
+- New messages
+- Profile access grants
+- Event reminders
+
+## Database Models
+
+- User: Authentication and preferences
+- Profile: User profile and discovery settings
+- Match: Connections between users
+- Message: Communication between matches
+- Event: Social gatherings and activities
+*/
